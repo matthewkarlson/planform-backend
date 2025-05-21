@@ -58,7 +58,9 @@ COPY pyproject.toml uv.lock* ./
 RUN curl -Ls https://astral.sh/uv/install.sh | bash && \
     export PATH="/root/.local/bin:${PATH}" && \
     uv pip install --system . && \
-    playwright install chromium
+    playwright install chromium && \
+    echo "Installed pip packages:" && \
+    uv pip list
     # Note: The Playwright browser cache will now be in /root/.cache/ms-playwright
     # within this single layer.
 

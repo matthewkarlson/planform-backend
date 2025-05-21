@@ -63,7 +63,7 @@ class Plan(Base):
     agency = relationship("Agency", back_populates="plans")
 
 DATABASE_URL = settings.DATABASE_URL
-# print(f"DATABASE_URL being used by SQLAlchemy: {DATABASE_URL}") # Removed for cleaner test output
+print(f"DATABASE_URL being used by SQLAlchemy: {DATABASE_URL}") # Add this for debugging
 
 engine = create_async_engine(DATABASE_URL, pool_size=5, max_overflow=5)
 AsyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)
