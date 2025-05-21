@@ -2,11 +2,16 @@ FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies (for Playwright Chromium and PostgreSQL client)
+# Install system dependencies (including build tools for asyncpg)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools
+    gcc \
+    python3-dev \
+    libpq-dev \
+    # For uv
     curl \
     gnupg \
-    # PostgreSQL client library (for asyncpg)
+    # PostgreSQL client runtime library (for asyncpg)
     libpq5 \
     # System utilities for Playwright
     ca-certificates \
