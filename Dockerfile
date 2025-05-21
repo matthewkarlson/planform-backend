@@ -1,19 +1,26 @@
+# ---------- build layer ----------
+FROM python:3.12-slim AS builder
+WORKDIR /app
+RUN apt-get update && \
+    apt-get install -y curl gnupg libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -Ls https://astral.sh/uv/install.sh | bash
+ENV PATH="/root/.local/bin:${PATH}"
+COPY pyproject.toml uv.lock* ./
+RUN uv pip install --system .
+RUN playwright install chromium
+
+# ---------- runtime layer ----------
 FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies (including build tools for asyncpg)
+# Install runtime system dependencies for Playwright (Chromium)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Build tools
-    gcc \
-    python3-dev \
-    libpq-dev \
-    # For uv
-    curl \
-    gnupg \
-    # PostgreSQL client runtime library (for asyncpg)
+    # PostgreSQL client library (for asyncpg) \
     libpq5 \
-    # System utilities for Playwright
+    # System utilities
     ca-certificates \
     fonts-liberation \
     libasound2 \
@@ -53,16 +60,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Clean up
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv, Python dependencies, and Playwright browsers
-COPY pyproject.toml uv.lock* ./
-RUN curl -Ls https://astral.sh/uv/install.sh | bash && \
-    export PATH="/root/.local/bin:${PATH}" && \
-    uv pip install --system . && \
-    playwright install chromium && \
-    echo "Installed pip packages:" && \
-    uv pip list
-    # Note: The Playwright browser cache will now be in /root/.cache/ms-playwright
-    # within this single layer.
+# Copy Python libraries and executables from builder
+COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy the Playwright browser cache from builder
+COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
 
 COPY app ./app
 EXPOSE 8000
