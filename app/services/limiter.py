@@ -1,57 +1,78 @@
 import os
 import time
-import redis.asyncio as aioredis # Use the async library
+from upstash_redis import Redis # SDK for Upstash REST API
+from fastapi.concurrency import run_in_threadpool
 
 RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", 100))
 RATE_WINDOW    = int(os.getenv("RATE_WINDOW_SECONDS", 60 * 60))   # 1 hour in seconds
 
-# Determine Redis URL:
-# 1. Try UPSTASH_REDIS_URL (for production, often starts with rediss:// for SSL)
-# 2. Fallback to REDIS_URL (for local Docker redis, e.g., redis://redis:6379 or redis://localhost:6379)
-# 3. Default if neither is set (primarily for docker-compose context where service is named 'redis')
-FINAL_REDIS_URL = os.getenv("UPSTASH_REDIS_URL") or \
-                  os.getenv("REDIS_URL", "redis://redis:6379")
+upstash_sdk_client = None
 
-redis_client = None
-if FINAL_REDIS_URL:
+# Configuration for Upstash REST API SDK
+REDIS_URL = os.getenv("REDIS_URL") # e.g., https://moved-oyster-22743.upstash.io
+REDIS_TOKEN = os.getenv("REDIS_TOKEN")
+
+if REDIS_URL and REDIS_TOKEN:
     try:
-        redis_client = aioredis.from_url(FINAL_REDIS_URL)
-        print(f"Rate limiter connected to Redis at: {FINAL_REDIS_URL}")
+        upstash_sdk_client = Redis(
+            url=REDIS_URL,
+            token=REDIS_TOKEN
+        )
+        # Test connection by trying to get a non-existent key (or a known one)
+        # The SDK doesn't have a direct .ping() like redis-py for REST.
+        # A get command will verify token and URL.
+        upstash_sdk_client.get("rate_limiter_ping_test") 
+        print(f"Rate limiter connected to Upstash Redis via REST API at: {REDIS_URL}")
     except Exception as e:
-        print(f"ERROR: Could not connect to Redis at {FINAL_REDIS_URL}. Rate limiting may not work. Error: {e}")
+        print(f"ERROR: Could not connect to Upstash Redis via REST API. Rate limiting may not work. Error: {e}")
+        upstash_sdk_client = None
 else:
-    print("WARN: No REDIS_URL or UPSTASH_REDIS_URL provided. Rate limiting will not connect to Redis.")
+    print("WARN: REDIS_URL or REDIS_TOKEN not set. Upstash SDK client not configured.")
+    # Note: This version does not have a fallback to local Redis, as it's specifically for the Upstash SDK.
+    # If you need local fallback, you'd re-introduce the redis-py client logic here or handle it upstream.
+
+if not upstash_sdk_client:
+    print("WARN: Upstash SDK client could not be configured for rate limiting. Limiter will allow all requests.")
+
+def _perform_upstash_sdk_check(key_name: str):
+    # This is a synchronous function using the Upstash SDK that will run in a thread pool
+    global upstash_sdk_client
+    if not upstash_sdk_client:
+        raise ConnectionError("Upstash SDK client not initialized for _perform_upstash_sdk_check")
+
+    # Upstash SDK pipeline for atomicity (if supported well for these commands, equivalent to MULTI/EXEC)
+    # Note: The Upstash SDK's pipeline might behave differently than redis-py's. 
+    # Check its documentation for atomicity guarantees for incr/expire combo.
+    # For simplicity, let's do sequential calls; for strict atomicity, Upstash Lua might be needed via REST or a different approach.
+    
+    current_count = upstash_sdk_client.incr(key_name)
+    if current_count == 1:
+        # Set expiry only if the key is new (count is 1)
+        upstash_sdk_client.expire(key_name, RATE_WINDOW)
+    
+    ttl = upstash_sdk_client.ttl(key_name)
+
+    if ttl is None or ttl < 0: # ttl can be None if key doesn't exist or -1 for no expiry, -2 for no key
+        # If key has no expiry (e.g., if incr happened but expire failed, or if key existed without TTL)
+        # or if key somehow doesn't exist after incr (unlikely but defensive)
+        # Ensure an expiry is set. This might re-set it if it already exists.
+        upstash_sdk_client.expire(key_name, RATE_WINDOW)
+        ttl = RATE_WINDOW # Assume it's set to the full window now
+        
+    return current_count, ttl
 
 async def check(identifier: str):
-    if not redis_client:
-        print(f"WARN: Redis client not available. Rate check for {identifier} allowed by default.")
+    if not upstash_sdk_client:
+        print(f"WARN: Upstash SDK client not available. Rate check for {identifier} allowed by default.")
         return {"allowed": True, "reset_at": time.time() + RATE_WINDOW, "current": 0, "limit": RATE_LIMIT_MAX}
 
-    key = f"rate_limit:{identifier}" # Changed key prefix for clarity
+    key = f"rate_limit:{identifier}"
     current_time = time.time()
 
     try:
-        async with redis_client.pipeline(transaction=True) as pipe:
-            # Increment the count for the current window
-            pipe.incr(key)
-            # Set expiry only if the key is new (count is 1)
-            # This is an atomic way to set TTL on first increment
-            pipe.expire(key, RATE_WINDOW, nx=True) # nx=True sets expiry only if no expiry is already set
-            # Get the current count and TTL after operations
-            pipe.ttl(key)
-            results = await pipe.execute()
+        # Run the synchronous Upstash SDK operations in a separate thread
+        current_count, ttl = await run_in_threadpool(_perform_upstash_sdk_check, key_name=key)
         
-        current_count = results[0]
-        ttl = results[2] # TTL is the third command in the pipeline
-
-        if ttl == -2: # Key does not exist (shouldn't happen if incr worked, but good check)
-            ttl = RATE_WINDOW
-        elif ttl == -1: # Key exists but has no associated expire
-            # This can happen if expire(nx=True) didn't set because key already had TTL or an issue occurred.
-            # To be safe, re-apply expire, or assume RATE_WINDOW.
-            await redis_client.expire(key, RATE_WINDOW)
-            ttl = RATE_WINDOW
-
         is_allowed = current_count <= RATE_LIMIT_MAX
         reset_at = current_time + ttl
 
@@ -62,6 +83,5 @@ async def check(identifier: str):
             "limit": RATE_LIMIT_MAX,
         }
     except Exception as e:
-        print(f"ERROR: Redis operation failed for rate limiting identifier {identifier}. Allowing request. Error: {e}")
-        # Fallback: allow the request if Redis fails to prevent blocking users due to limiter issues.
+        print(f"ERROR: Upstash SDK operation failed for rate limiting identifier {identifier}. Allowing request. Error: {e}")
         return {"allowed": True, "reset_at": current_time + RATE_WINDOW, "current": "unknown", "limit": RATE_LIMIT_MAX}

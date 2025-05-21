@@ -10,5 +10,6 @@ dependencies = [
   "openai>=1",
   "playwright==1.*",
   "python-dotenv",
-  "pydantic-settings"
+  "pydantic-settings",
+  "upstash-redis",
 ]

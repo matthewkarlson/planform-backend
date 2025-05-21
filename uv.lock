@@ -247,6 +247,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "redis" },
     { name = "sqlalchemy" },
+    { name = "upstash-redis" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -260,6 +261,7 @@ requires-dist = [
     { name = "python-dotenv" },
     { name = "redis", specifier = ">=5" },
     { name = "sqlalchemy", specifier = ">=2" },
+    { name = "upstash-redis" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 
@@ -459,6 +461,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/82/5c/e6082df02e215b846b4b8c0b887a64d7d08ffaba30605502639d44c06b82/typing_inspection-0.4.0.tar.gz", hash = "sha256:9765c87de36671694a67904bf2c96e395be9c6439bb6c87b5142569dcdd65122", size = 76222, upload-time = "2025-02-25T17:27:59.638Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/31/08/aa4fdfb71f7de5176385bd9e90852eaf6b5d622735020ad600f2bab54385/typing_inspection-0.4.0-py3-none-any.whl", hash = "sha256:50e72559fcd2a6367a19f7a7e610e6afcb9fac940c650290eed893d61386832f", size = 14125, upload-time = "2025-02-25T17:27:57.754Z" },
+]
+
+[[package]]
+name = "upstash-redis"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/4c/308af54f76b54c2245f60a8f294ec710738402d44291e8605aeac8d82532/upstash_redis-1.4.0.tar.gz", hash = "sha256:e3b77205cb99695b8000042695f8054e27c12fbc2eebe5ccdd428d986b11de87", size = 34976, upload-time = "2025-04-11T13:31:39.274Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/39/1d/faadd7437cbb7496ca8971e18e0ccaf57b373a87ed470562e1f12a67a63e/upstash_redis-1.4.0-py3-none-any.whl", hash = "sha256:88e41c4e95be3ea1e97b5e7818dcecd1bcbea5a3f074cc2c41951bd07fe0db1c", size = 37305, upload-time = "2025-04-11T13:31:37.587Z" },
 ]
 
 [[package]]
