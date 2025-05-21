@@ -67,6 +67,5 @@ COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
 
 COPY app ./app
 COPY .env .env
-COPY .env.local .env.local
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
