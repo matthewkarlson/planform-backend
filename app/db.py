@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, JSON,
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from app.config import settings
+import re
 
 Base = declarative_base()
 
@@ -62,10 +63,28 @@ class Plan(Base):
     client = relationship("Client", back_populates="plans")
     agency = relationship("Agency", back_populates="plans")
 
-DATABASE_URL = settings.DATABASE_URL
-# print(f"DATABASE_URL being used by SQLAlchemy: {DATABASE_URL}") # Removed for cleaner test output
+DATABASE_URL_FROM_SETTINGS = settings.DATABASE_URL
 
-engine = create_async_engine(DATABASE_URL, pool_size=5, max_overflow=5)
+# Re-add sslmode stripping logic for robustness
+CLEANED_DATABASE_URL = DATABASE_URL_FROM_SETTINGS
+if DATABASE_URL_FROM_SETTINGS and "sslmode=" in DATABASE_URL_FROM_SETTINGS:
+    TEMP_URL = re.sub(r"sslmode=[^&]*&?", "", DATABASE_URL_FROM_SETTINGS)
+    CLEANED_DATABASE_URL = re.sub(r"\?&", "?", TEMP_URL)
+    if CLEANED_DATABASE_URL.endswith("?"):
+        CLEANED_DATABASE_URL = CLEANED_DATABASE_URL[:-1]
+    if not CLEANED_DATABASE_URL.startswith(DATABASE_URL_FROM_SETTINGS.split("://")[0] + "://"):
+        CLEANED_DATABASE_URL = DATABASE_URL_FROM_SETTINGS
+
+# print(f"Using DATABASE_URL for SQLAlchemy: {CLEANED_DATABASE_URL}")
+
+engine = create_async_engine(
+    CLEANED_DATABASE_URL, 
+    pool_size=5, 
+    max_overflow=5,
+    pool_recycle=1800,  # Recycle connections every 30 minutes
+    pool_pre_ping=True  # Enable pre-ping to check connection liveness
+)
+
 AsyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)
 
 async def get_db():

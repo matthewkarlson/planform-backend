@@ -3,7 +3,7 @@ import asyncio
 import json
 
 # --- Configuration ---
-BASE_URL = "http://127.0.0.1:8000"  # Your FastAPI app's address
+BASE_URL = "https://planform-backend.onrender.com"  # Your FastAPI app's address
 PLAN_ENDPOINT_URL = f"{BASE_URL}/plan"
 
 # !!! IMPORTANT: Replace with a VALID apiKey from an agency in YOUR development database !!!
@@ -55,7 +55,16 @@ async def send_plan_request():
         print("Please ensure your FastAPI application is running.")
         print(f"Details: {e}")
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print(f"An unexpected error occurred:")
+        print(f"Error Type: {type(e)}")
+        print(f"Error Details: {repr(e)}")
+        # If the exception has a response attribute (like httpx.HTTPStatusError), print its content
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response Status Code (from exception): {e.response.status_code}")
+            try:
+                print(f"Response Content (from exception): {e.response.text}")
+            except Exception as ex_resp:
+                print(f"Could not get response text from exception: {ex_resp}")
 
 if __name__ == "__main__":
     if AGENCY_API_KEY == "YOUR_VALID_AGENCY_API_KEY_HERE":
