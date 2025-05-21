@@ -18,6 +18,8 @@ ENV PYTHONUNBUFFERED=1
 
 # Install runtime system dependencies for Playwright (Chromium)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # PostgreSQL client library (for asyncpg) \
+    libpq5 \
     # System utilities
     ca-certificates \
     fonts-liberation \
