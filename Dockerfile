@@ -69,4 +69,6 @@ COPY --from=builder /root/.cache/ms-playwright /root/.cache/ms-playwright
 
 COPY app ./app
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use shell form of CMD to allow environment variable substitution for the port
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

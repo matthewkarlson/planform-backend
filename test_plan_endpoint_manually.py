@@ -1,6 +1,7 @@
 import httpx
 import asyncio
 import json
+import time # Import time module
 
 # --- Configuration ---
 BASE_URL = "https://planform-backend.onrender.com"  # Your FastAPI app's address
@@ -27,8 +28,13 @@ async def send_plan_request():
     print(f"Payload:\n{json.dumps(payload, indent=2)}\n")
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client: # Increased timeout for potentially long operations
+        start_time = time.monotonic() # Record start time
+        async with httpx.AsyncClient(timeout=120.0) as client: # Increased timeout to 120 seconds
             response = await client.post(PLAN_ENDPOINT_URL, json=payload)
+        end_time = time.monotonic() # Record end time
+
+        duration = end_time - start_time
+        print(f"Request completed in {duration:.2f} seconds.")
 
         print(f"Response Status Code: {response.status_code}")
         try:

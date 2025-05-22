@@ -11,11 +11,17 @@ from app.services.limiter import check as check_rate
 from app.services.scraper import screenshot
 from app.services.openai_llm import analyse_website, recommend_services
 from app.db import get_db, Agency as App_DB_Agency, Service as App_DB_Service, Client as App_DB_Client, Plan as App_DB_Plan # Add Client, Plan
+import logging # Import logging
 
 app = FastAPI()
 
+# Configure basic logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 @app.post("/plan")
 async def generate_plan(payload: ClientResponses, req: Request, db: AsyncSession = Depends(get_db)):
+    logger.info(f"Received request for /plan. API Key: {payload.apiKey}, Email: {payload.email}, Website URL: {payload.websiteUrl}")
     ident = payload.apiKey or req.client.host
     rl = await check_rate(ident)
     if not rl["allowed"]:
