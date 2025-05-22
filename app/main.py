@@ -114,7 +114,7 @@ async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncS
             "recommendations": ai_response_data.recommendations,
             "executiveSummary": ai_response_data.executiveSummary,
             "websiteAnalysis": website_analysis,
-            # "screenshotBase64": b64 # Typically not returned in final planData, but was in original response
+            "screenshotBase64": b64 # Typically not returned in final planData, but was in original response
         }
         task_statuses[task_id] = {"status": "completed", "planData": plan_data_for_response}
         logger.info(f"Task {task_id}: Plan generation completed successfully.")
