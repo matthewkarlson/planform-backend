@@ -1,7 +1,8 @@
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=".env.local")
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 # from sqlalchemy.future import select # Removed as select is imported from sqlalchemy directly or not used for this query type
 from sqlalchemy.orm import selectinload
@@ -12,6 +13,8 @@ from app.services.scraper import screenshot
 from app.services.openai_llm import analyse_website, recommend_services
 from app.db import get_db, Agency as App_DB_Agency, Service as App_DB_Service, Client as App_DB_Client, Plan as App_DB_Plan # Add Client, Plan
 import logging # Import logging
+import uuid # Added for taskId generation
+from typing import Dict, Any # Added for typing
 
 app = FastAPI()
 
@@ -19,92 +22,162 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# In-memory store for task statuses. 
+# TODO: Replace with a more robust solution like Redis or a database table for production.
+task_statuses: Dict[str, Dict[str, Any]] = {}
+
+async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncSession, agency_api_key: str, client_host: str):
+    try:
+        task_statuses[task_id]["status"] = "processing"
+        
+        # Fetch agency and services from DB (Replicated from original endpoint)
+        agency_query_statement = (
+            select(App_DB_Agency)
+            .where(App_DB_Agency.api_key == agency_api_key) # Use passed apiKey
+            .options(selectinload(App_DB_Agency.services))
+        )
+        agency_result = await db.execute(agency_query_statement)
+        db_agency = agency_result.scalars().first()
+
+        if not db_agency:
+            task_statuses[task_id] = {"status": "failed", "error": "Agency not found."}
+            logger.error(f"Task {task_id}: Agency not found for API key.")
+            return
+
+        agency_desc = db_agency.description
+        services = [
+            {
+                "name": service.name,
+                "description": service.description,
+                "outcomes": service.outcomes,
+                "price_lower": service.price_lower,
+                "price_upper": service.price_upper,
+                "when_to_recommend": service.when_to_recommend,
+                "is_active": service.is_active,
+            }
+            for service in db_agency.services
+        ]
+
+        website_analysis = None
+        b64 = None
+        all_payload_data_for_analysis = payload.model_dump()
+        if payload.model_extra:
+            all_payload_data_for_analysis.update(payload.model_extra)
+            
+        if payload.websiteUrl:
+            b64, _ = await screenshot(payload.websiteUrl)
+            website_analysis = await analyse_website(b64, payload.websiteUrl, all_payload_data_for_analysis)
+
+        all_payload_data_for_recommend = payload.model_dump()
+        if payload.model_extra:
+            all_payload_data_for_recommend.update(payload.model_extra)
+
+        ai_response_data = await recommend_services(agency_desc, services, all_payload_data_for_recommend, website_analysis)
+
+        # Find or create client
+        db_client = None
+        if payload.email:
+            client_query = await db.execute(
+                select(App_DB_Client).where(App_DB_Client.email == payload.email, App_DB_Client.agency_id == db_agency.id)
+            )
+            db_client = client_query.scalars().first()
+
+        if not db_client and payload.email:
+            db_client = App_DB_Client(
+                email=payload.email,
+                name=payload.name,
+                website_url=payload.websiteUrl,
+                agency_id=db_agency.id
+            )
+            db.add(db_client)
+            await db.flush()
+
+        # Save plan to DB
+        new_plan = App_DB_Plan(
+            client_id=db_client.id if db_client else None,
+            agency_id=db_agency.id,
+            plan_data=ai_response_data.model_dump()
+        )
+        db.add(new_plan)
+        
+        await db.commit()
+        await db.refresh(new_plan)
+        if db_client:
+            await db.refresh(db_client)
+
+        # IMPORTANT: This is where planData should match the PlanData interface in lib/actions.ts
+        # We are currently returning the full set of data, which might be more than lib/actions.ts expects
+        # Review and adjust the 'planData' structure as needed.
+        plan_data_for_response = {
+            "planId": new_plan.id,
+            "clientId": db_client.id if db_client else None,
+            "recommendations": ai_response_data.recommendations,
+            "executiveSummary": ai_response_data.executiveSummary,
+            "websiteAnalysis": website_analysis,
+            # "screenshotBase64": b64 # Typically not returned in final planData, but was in original response
+        }
+        task_statuses[task_id] = {"status": "completed", "planData": plan_data_for_response}
+        logger.info(f"Task {task_id}: Plan generation completed successfully.")
+
+    except Exception as e:
+        logger.error(f"Task {task_id}: Error during plan generation: {e}", exc_info=True)
+        task_statuses[task_id] = {"status": "failed", "error": str(e)}
+    finally:
+        # Ensure the database session is closed if this async task created its own session
+        # If db is passed from the main endpoint, it's managed there.
+        # For now, assuming db session management is handled by the caller (Depends(get_db))
+        pass
+
+
 @app.post("/plan")
-async def generate_plan(payload: ClientResponses, req: Request, db: AsyncSession = Depends(get_db)):
+async def generate_plan_request(
+    payload: ClientResponses, 
+    req: Request, 
+    background_tasks: BackgroundTasks, # Added BackgroundTasks
+    db: AsyncSession = Depends(get_db)
+):
     logger.info(f"Received request for /plan. API Key: {payload.apiKey}, Email: {payload.email}, Website URL: {payload.websiteUrl}")
     ident = payload.apiKey or req.client.host
     rl = await check_rate(ident)
     if not rl["allowed"]:
-        raise HTTPException(429, detail=rl)
+        raise HTTPException(status_code=429, detail=rl)
 
-    # Fetch agency and services from DB
-    agency_query_statement = (
-        select(App_DB_Agency)
-        .where(App_DB_Agency.api_key == payload.apiKey)
-        .options(selectinload(App_DB_Agency.services))
-    )
-    agency_result = await db.execute(agency_query_statement)
-    db_agency = agency_result.scalars().first() # Renamed to db_agency to avoid conflict with relationship name
-
-    if not db_agency:
-        raise HTTPException(status_code=404, detail="Agency not found for the provided API key.")
-
-    agency_desc = db_agency.description
-    services = [
-        {
-            "name": service.name,
-            "description": service.description,
-            "outcomes": service.outcomes,
-            "price_lower": service.price_lower,
-            "price_upper": service.price_upper,
-            "when_to_recommend": service.when_to_recommend,
-            "is_active": service.is_active,
-        }
-        for service in db_agency.services
-    ]
-
-    website_analysis = None
-    b64 = None
-    all_payload_data_for_analysis = payload.model_dump()
-    if payload.model_extra:
-        all_payload_data_for_analysis.update(payload.model_extra)
-        
-    if payload.websiteUrl:
-        b64, _ = await screenshot(payload.websiteUrl)
-        website_analysis = await analyse_website(b64, payload.websiteUrl, all_payload_data_for_analysis)
-
-    all_payload_data_for_recommend = payload.model_dump()
-    if payload.model_extra:
-        all_payload_data_for_recommend.update(payload.model_extra)
-
-    ai_response_data = await recommend_services(agency_desc, services, all_payload_data_for_recommend, website_analysis)
-
-    # Find or create client
-    db_client = None
-    if payload.email:
-        client_query = await db.execute(
-            select(App_DB_Client).where(App_DB_Client.email == payload.email, App_DB_Client.agency_id == db_agency.id)
-        )
-        db_client = client_query.scalars().first()
-
-    if not db_client and payload.email: # Create client if email is provided and client not found
-        db_client = App_DB_Client(
-            email=payload.email,
-            name=payload.name,
-            website_url=payload.websiteUrl,
-            agency_id=db_agency.id
-        )
-        db.add(db_client)
-        await db.flush() # Flush to get client ID if needed before commit, or rely on commit
-
-    # Save plan to DB
-    new_plan = App_DB_Plan(
-        client_id=db_client.id if db_client else None,
-        agency_id=db_agency.id,
-        plan_data=ai_response_data.model_dump() # Assuming ai_response_data is a Pydantic model
-    )
-    db.add(new_plan)
+    task_id = str(uuid.uuid4())
+    task_statuses[task_id] = {"status": "pending", "request_payload": payload.model_dump(mode='json')} # Store payload if needed
     
-    await db.commit()
-    await db.refresh(new_plan) # Refresh to get created_at, id etc.
-    if db_client: # Refresh client if it was newly created
-        await db.refresh(db_client)
+    # Pass the original apiKey and client host for the background task
+    # This is important because the 'payload' object might not be safe to pass directly
+    # if it contains sensitive or large data that's not needed by the async task's core logic.
+    # However, the core logic *does* need the apiKey for agency lookup.
+    background_tasks.add_task(generate_plan_async, task_id, payload, db, payload.apiKey, req.client.host)
+    
+    logger.info(f"Task {task_id} created for /plan request. Returning 202 Accepted.")
+    return JSONResponse(status_code=202, content={"taskId": task_id})
 
-    return {
-        "planId": new_plan.id, # Optionally return the new plan ID
-        "clientId": db_client.id if db_client else None, # Optionally return client ID
-        "recommendations": ai_response_data.recommendations,
-        "executiveSummary": ai_response_data.executiveSummary,
-        "websiteAnalysis": website_analysis,
-        "screenshotBase64": b64
-    }
+
+@app.get("/plan/status/{task_id}")
+async def get_plan_status(task_id: str):
+    logger.info(f"Received request for /plan/status/{task_id}")
+    status_info = task_statuses.get(task_id)
+    if not status_info:
+        logger.warning(f"Task {task_id} not found in status check.")
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    logger.info(f"Returning status for task {task_id}: {status_info.get('status')}")
+    return status_info
+
+# Ensure the original generate_plan logic is now within generate_plan_async
+# The old @app.post("/plan") endpoint content is significantly refactored or moved.
+# The new @app.post("/plan") which is now generate_plan_request, handles task creation.
+
+# Original content of generate_plan is now largely inside generate_plan_async.
+# The following is the original structure of the return for the synchronous endpoint
+# for reference when building planData in generate_plan_async if needed.
+    # return {
+    #     "planId": new_plan.id,
+    #     "clientId": db_client.id if db_client else None,
+    #     "recommendations": ai_response_data.recommendations,
+    #     "executiveSummary": ai_response_data.executiveSummary,
+    #     "websiteAnalysis": website_analysis,
+    #     "screenshotBase64": b64 # Consider if this should be part of 'planData'
+    # }
