@@ -9,11 +9,12 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import select # Ensure select is imported if it was meant to be from here
 from app.schemas import ClientResponses, DisplayServiceRecommendation
 from app.services.limiter import check as check_rate
-from app.services.scraper import screenshot
-from app.services.openai_llm import analyse_website, recommend_services
+from app.services.scraper import screenshot, crawl_website
+from app.services.openai_llm import analyse_website, recommend_services, extract_company_insights
 from app.db import get_db, Agency as App_DB_Agency, Service as App_DB_Service, Client as App_DB_Client, Plan as App_DB_Plan # Add Client, Plan
 import logging # Import logging
 import uuid # Added for taskId generation
+import asyncio # Added for parallel execution
 from typing import Dict, Any # Added for typing
 
 app = FastAPI()
@@ -58,19 +59,34 @@ async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncS
         ]
         website_analysis = None
         b64 = None
+        company_insights = None
         all_payload_data_for_analysis = payload.model_dump()
         if payload.model_extra:
             all_payload_data_for_analysis.update(payload.model_extra)
             
         if payload.websiteUrl:
-            b64, _ = await screenshot(payload.websiteUrl)
+            # Run screenshot and website crawling in parallel for speed
+            screenshot_task = screenshot(payload.websiteUrl)
+            crawl_task = crawl_website(payload.websiteUrl, max_pages=6)
+            
+            # Execute both tasks in parallel
+            (b64, _), crawled_content = await asyncio.gather(screenshot_task, crawl_task)
+            
+            # Analyze the screenshot
             website_analysis = await analyse_website(b64, payload.websiteUrl, all_payload_data_for_analysis)
+            
+            # Extract company insights from crawled content
+            if crawled_content:
+                company_insights = await extract_company_insights(crawled_content, all_payload_data_for_analysis)
+                logger.info(f"Task {task_id}: Extracted insights from {len(crawled_content)} pages")
+            else:
+                logger.warning(f"Task {task_id}: No content found during website crawl")
 
         all_payload_data_for_recommend = payload.model_dump()
         if payload.model_extra:
             all_payload_data_for_recommend.update(payload.model_extra)
 
-        ai_response_data = await recommend_services(agency_desc, services, all_payload_data_for_recommend, website_analysis)
+        ai_response_data = await recommend_services(agency_desc, services, all_payload_data_for_recommend, website_analysis, company_insights)
 
         # Find or create client
         db_client = None
