@@ -13,6 +13,7 @@ class ClientResponses(BaseModel):
         extra = 'allow'  # Allow extra fields and store them
 
 class ServiceRecommendation(BaseModel):
+    id: int
     serviceId: str
     reason:    str
 
@@ -26,3 +27,6 @@ class WebsiteAnalysis(BaseModel):
 class AIResponse(BaseModel):
     recommendations: List[ServiceRecommendation]
     executiveSummary: str
+
+class DisplayServiceRecommendation(ServiceRecommendation):
+    description: str

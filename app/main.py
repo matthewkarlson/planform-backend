@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # from sqlalchemy.future import select # Removed as select is imported from sqlalchemy directly or not used for this query type
 from sqlalchemy.orm import selectinload
 from sqlalchemy import select # Ensure select is imported if it was meant to be from here
-from app.schemas import ClientResponses
+from app.schemas import ClientResponses, DisplayServiceRecommendation
 from app.services.limiter import check as check_rate
 from app.services.scraper import screenshot
 from app.services.openai_llm import analyse_website, recommend_services
@@ -53,11 +53,9 @@ async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncS
                 "price_lower": service.price_lower,
                 "price_upper": service.price_upper,
                 "when_to_recommend": service.when_to_recommend,
-                "is_active": service.is_active,
             }
             for service in db_agency.services
         ]
-
         website_analysis = None
         b64 = None
         all_payload_data_for_analysis = payload.model_dump()
@@ -108,13 +106,23 @@ async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncS
         # IMPORTANT: This is where planData should match the PlanData interface in lib/actions.ts
         # We are currently returning the full set of data, which might be more than lib/actions.ts expects
         # Review and adjust the 'planData' structure as needed.
+        # Note serviceId is a string so we have to find the service description by matching the serviceId to the service in the services list
+        display_recommendations = []
+        for recommendation in ai_response_data.recommendations:
+            display_recommendations.append(DisplayServiceRecommendation(
+                id=recommendation.id,
+                serviceId=recommendation.serviceId,
+                reason=recommendation.reason,
+                description=services[recommendation.id]["description"]
+            ))
+
         plan_data_for_response = {
             "planId": new_plan.id,
             "clientId": db_client.id if db_client else None,
-            "recommendations": ai_response_data.recommendations,
+            "recommendations": display_recommendations,
             "executiveSummary": ai_response_data.executiveSummary,
             "websiteAnalysis": website_analysis,
-            "screenshotBase64": b64 # Typically not returned in final planData, but was in original response
+            "screenshotBase64": b64 
         }
         task_statuses[task_id] = {"status": "completed", "planData": plan_data_for_response}
         logger.info(f"Task {task_id}: Plan generation completed successfully.")
