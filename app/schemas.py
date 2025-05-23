@@ -3,12 +3,9 @@ from typing import List, Optional, Dict
 
 class ClientResponses(BaseModel):
     websiteUrl: Optional[str] = None
-    agencyId:  Optional[str] = None
-    apiKey:    Optional[str] = None
-    email:     Optional[str] = None
-    name:      Optional[str] = None
-    # __root__ is removed. Extra fields will be caught by model_extra.
-
+    apiKey:     str
+    email:      str 
+    name:       Optional[str] = None
     class Config:
         extra = 'allow'  # Allow extra fields and store them
 
@@ -27,6 +24,9 @@ class WebsiteAnalysis(BaseModel):
 class AIResponse(BaseModel):
     recommendations: List[ServiceRecommendation]
     executiveSummary: str
+    planTitle: str
+    subTitle: str
+    callToAction: str
 
 class DisplayServiceRecommendation(ServiceRecommendation):
     description: str

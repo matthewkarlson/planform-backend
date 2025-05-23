@@ -36,14 +36,38 @@ async def recommend_services(agency_desc: str, services: list,
 {json.dumps(answers, indent=2)}
 
 We have analyzed the first fold of their website and provided the following feedback:
-{website.model_dump_json(indent=2)}
+These is was the overall impression of the website:
+{website.overallImpression}
+
+These are the strengths of the website:
+{website.strengths}
+
+These are the weaknesses of the website:
+{website.weaknesses}
+
+These are the recommendations for the website:
+{website.recommendations}
 
 Based on these responses, recommend the most appropriate services from this catalog:
 {json.dumps(services, indent=2)}
 
 For each recommended service, provide a clear justification based on the client's specific needs.
 Your response will be shown to the client so it should be addressed to them.
-You should be specific with the transformation that the service you are recommending will deliver to the client."""
+You should be specific with the transformation that the service you are recommending will deliver to the client.
+The plan title should be a a powerful hook that grips the reader and makes them want to read on. Remember this is a title
+Its in large text and should be ultra brief and punchy.
+The sub title should elaborate on the title and really lock in the client and get them to read on. It should be one short punchy sentence.
+The sub title will be just below the title and will be in smaller text.
+The call to action should be a powerful call to action that makes the client want to act now. It is displayed at the bottom of the page
+in large text on a button so keep it brief, just a few powerful, personalised words.
+
+Your ultimate goal is to craft the ultimate plan and sales pitch that converts clients using 
+powerfuls sales tactics. Use well researched human psychology and sales tactics to speak to the client's
+emotions and show them exactly we take them to their dream outcome.
+
+Not overly focussed on the features of the services, but on the outcomes and emotions they will feel, a business they can be proud of.
+Also keep it brief but powerful.
+"""
 
     system_prompt = f"""You are an expert business consultant that works for the agency and helps match client needs
         to appropriate services. Provide structured, specific recommendations that are directly tied to the client's responses.

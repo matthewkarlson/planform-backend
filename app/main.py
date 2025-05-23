@@ -103,10 +103,6 @@ async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncS
         if db_client:
             await db.refresh(db_client)
 
-        # IMPORTANT: This is where planData should match the PlanData interface in lib/actions.ts
-        # We are currently returning the full set of data, which might be more than lib/actions.ts expects
-        # Review and adjust the 'planData' structure as needed.
-        # Note serviceId is a string so we have to find the service description by matching the serviceId to the service in the services list
         display_recommendations = []
         for recommendation in ai_response_data.recommendations:
             display_recommendations.append(DisplayServiceRecommendation(
@@ -122,7 +118,10 @@ async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncS
             "recommendations": display_recommendations,
             "executiveSummary": ai_response_data.executiveSummary,
             "websiteAnalysis": website_analysis,
-            "screenshotBase64": b64 
+            "screenshotBase64": b64,
+            "planTitle": ai_response_data.planTitle,
+            "subTitle": ai_response_data.subTitle,
+            "callToAction": ai_response_data.callToAction
         }
         task_statuses[task_id] = {"status": "completed", "planData": plan_data_for_response}
         logger.info(f"Task {task_id}: Plan generation completed successfully.")
@@ -131,9 +130,6 @@ async def generate_plan_async(task_id: str, payload: ClientResponses, db: AsyncS
         logger.error(f"Task {task_id}: Error during plan generation: {e}", exc_info=True)
         task_statuses[task_id] = {"status": "failed", "error": str(e)}
     finally:
-        # Ensure the database session is closed if this async task created its own session
-        # If db is passed from the main endpoint, it's managed there.
-        # For now, assuming db session management is handled by the caller (Depends(get_db))
         pass
 
 
@@ -152,11 +148,6 @@ async def generate_plan_request(
 
     task_id = str(uuid.uuid4())
     task_statuses[task_id] = {"status": "pending", "request_payload": payload.model_dump(mode='json')} # Store payload if needed
-    
-    # Pass the original apiKey and client host for the background task
-    # This is important because the 'payload' object might not be safe to pass directly
-    # if it contains sensitive or large data that's not needed by the async task's core logic.
-    # However, the core logic *does* need the apiKey for agency lookup.
     background_tasks.add_task(generate_plan_async, task_id, payload, db, payload.apiKey, req.client.host)
     
     logger.info(f"Task {task_id} created for /plan request. Returning 202 Accepted.")
@@ -173,19 +164,3 @@ async def get_plan_status(task_id: str):
     
     logger.info(f"Returning status for task {task_id}: {status_info.get('status')}")
     return status_info
-
-# Ensure the original generate_plan logic is now within generate_plan_async
-# The old @app.post("/plan") endpoint content is significantly refactored or moved.
-# The new @app.post("/plan") which is now generate_plan_request, handles task creation.
-
-# Original content of generate_plan is now largely inside generate_plan_async.
-# The following is the original structure of the return for the synchronous endpoint
-# for reference when building planData in generate_plan_async if needed.
-    # return {
-    #     "planId": new_plan.id,
-    #     "clientId": db_client.id if db_client else None,
-    #     "recommendations": ai_response_data.recommendations,
-    #     "executiveSummary": ai_response_data.executiveSummary,
-    #     "websiteAnalysis": website_analysis,
-    #     "screenshotBase64": b64 # Consider if this should be part of 'planData'
-    # }
