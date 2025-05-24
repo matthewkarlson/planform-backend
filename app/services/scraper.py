@@ -2,6 +2,7 @@ import base64, uuid, tempfile
 import asyncio
 from urllib.parse import urljoin, urlparse
 from playwright.async_api import async_playwright
+import time
 
 async def screenshot(url: str) -> tuple[str, str]:
     async with async_playwright() as p:
@@ -9,6 +10,7 @@ async def screenshot(url: str) -> tuple[str, str]:
         page    = await browser.new_page(viewport={"width":1366,"height":768})
         await page.goto(url, wait_until="domcontentloaded")
         # nuke typical cookie banners
+        time.sleep(1)
         await page.add_style_tag(content='[class*="cookie"],[id*="cookie"]{display:none!important}')
         img = await page.screenshot(type="png")
         await browser.close()

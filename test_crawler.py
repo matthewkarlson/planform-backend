@@ -11,7 +11,7 @@ async def test_crawler():
     """Test the website crawler with a sample URL"""
     
     # Test URL - you can change this to any website you want to test
-    test_url = "https://nobullagency.co.uk"
+    test_url = "https://easya.io"
     
     print(f"🕷️ Starting to crawl: {test_url}")
     print("=" * 60)
